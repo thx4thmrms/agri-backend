@@ -4,3 +4,4 @@ APScheduler
 gunicorn
 schedule
 beautifulsoup4
+flask-cors
