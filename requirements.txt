@@ -1,4 +1,5 @@
 flask
 requests
-APScheduler  # 定时任务库
+APScheduler
 gunicorn
+schedule
