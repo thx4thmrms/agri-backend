@@ -72,6 +72,9 @@ ALLOWED_DOMAINS = [
     "aquatech.cn", "fishxun.com", "agri-tech.com.cn", "hydroponics.cn"
 ]
 
+# 全局标志，确保只在首次请求时执行初始化
+first_request = True
+
 # 模拟获取政策数据（实际使用时替换为真实API调用）
 def fetch_policy_data():
     try:
@@ -184,11 +187,16 @@ def start_scheduled_task():
     task_thread = threading.Thread(target=scheduled_task)
     task_thread.daemon = True
     task_thread.start()
+    print("定时任务线程已启动")
 
 # 应用启动时初始化
-@app.before_first_request
+@app.before_request
 def initialize():
-    start_scheduled_task()
+    global first_request
+    if first_request:
+        first_request = False
+        start_scheduled_task()
+        print("应用初始化完成")
 
 # 运行应用
 if __name__ == '__main__':
