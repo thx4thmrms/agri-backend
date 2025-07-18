@@ -8,8 +8,12 @@ import json
 import os
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+from flask_cors import CORS  # 新增：跨域支持库
 
 app = Flask(__name__)
+
+# ========== 新增：跨域配置（关键修改） ==========
+CORS(app, resources={r"/api/*": {"origins": "*"}})  # 允许所有域名访问API
 
 # 健康检查路由
 @app.route('/')
