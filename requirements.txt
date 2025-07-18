@@ -3,3 +3,4 @@ requests
 APScheduler
 gunicorn
 schedule
+beautifulsoup4
