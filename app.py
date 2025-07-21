@@ -90,27 +90,44 @@ first_request = True
 POLICY_DATA = []
 
 
-# 生成政策数据
+# 爬取政策数据
 def fetch_policy_data():
     try:
         policy_list = []
         for keyword in KEYWORDS:
             for domain in ALLOWED_DOMAINS:
-                province_code = domain.split('.')[0]
-                province = PROVINCE_MAP.get(province_code, "全国")
-                
-                response = {
-                    "title": f"2025年{keyword}技术指南与政策支持 - {domain}",
-                    "source": domain,
-                    "date": datetime.now().strftime("%Y-%m-%d"),
-                    "content": f"关于{keyword}的最新技术发展和补贴标准...",
-                    "url": f"https://{domain}/policy/{keyword}/",
-                    "id": f"{domain}-{keyword}",
-                    "category": "policy" if "政策" in keyword else "fund" if "资金" in keyword else "tech",
-                    "province": province
-                }
-                policy_list.append(response)
-        
+                try:
+                    url = f"https://{domain}/search?q={keyword}"
+                    response = requests.get(url)
+                    response.raise_for_status()
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    # 这里需要根据实际网页结构修改选择器
+                    articles = soup.find_all('article')
+                    for article in articles:
+                        title = article.find('h2').text.strip() if article.find('h2') else '未找到标题'
+                        content = article.find('p').text.strip() if article.find('p') else '未找到内容'
+                        source = domain
+                        date = datetime.now().strftime("%Y-%m-%d")
+                        article_url = article.find('a')['href'] if article.find('a') else '未找到链接'
+                        policy_id = f"{domain}-{hash(article_url)}"
+                        category = "policy" if "政策" in keyword else "fund" if "资金" in keyword else "tech"
+                        province_code = domain.split('.')[0]
+                        province = PROVINCE_MAP.get(province_code, "全国")
+
+                        policy = {
+                            "title": title,
+                            "source": source,
+                            "date": date,
+                            "content": content,
+                            "url": article_url,
+                            "id": policy_id,
+                            "category": category,
+                            "province": province
+                        }
+                        policy_list.append(policy)
+                except Exception as e:
+                    print(f"从 {domain} 爬取 {keyword} 数据失败: {e}")
+
         # 去重
         unique_policies = []
         seen_urls = set()
@@ -118,7 +135,7 @@ def fetch_policy_data():
             if policy["url"] not in seen_urls:
                 seen_urls.add(policy["url"])
                 unique_policies.append(policy)
-        
+
         return unique_policies
     except Exception as e:
         print(f"获取政策数据失败: {e}")
