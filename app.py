@@ -12,14 +12,14 @@ from flask_cors import CORS
 
 app = Flask(__name__)
 
-# ========== 【保留】跨域配置（原代码不变） ==========
+# ========== 跨域配置 ==========
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# ========== 【保留】历史功能变量（完整列出，无省略） ==========
+# ========== 历史功能变量 ==========
 REPORT_DIR = "policy_data"
 os.makedirs(REPORT_DIR, exist_ok=True)
 
-# 【完整保留】所有关键词（原列表全量复制）
+# 完整关键词列表
 KEYWORDS = [
     # 内陆渔业养殖
     "池塘养殖", "淡水养殖", "鱼苗繁育", "循环水养殖", "稻渔综合种养",
@@ -55,7 +55,7 @@ KEYWORDS = [
     "现代农业产业园", "渔业绿色发展", "生态补偿", "碳汇渔业"
 ]
 
-# 【完整保留】所有允许的域名（原列表全量复制）
+# 允许的域名列表
 ALLOWED_DOMAINS = [
     # 政府网站
     "gov.cn", "agri.gov.cn", "moa.gov.cn", "nynct.gov.cn",
@@ -71,7 +71,7 @@ ALLOWED_DOMAINS = [
     "aquatech.cn", "fishxun.com", "agri-tech.com.cn", "hydroponics.cn"
 ]
 
-# 模拟省份映射（实际项目应从政策数据中提取
+# 省份映射
 PROVINCE_MAP = {
     "beijing": "北京", "shanghai": "上海", "guangdong": "广东",
     "zhejiang": "浙江", "jiangsu": "江苏", "shandong": "山东",
@@ -86,20 +86,17 @@ PROVINCE_MAP = {
     "neimenggu": "内蒙古"
 }
 
-first_request = True  # 【保留】首次请求标志
-
-# ========== 【新增】前端接口专用：政策数据存储（复用原模拟逻辑） ==========
-POLICY_DATA = []  # 存储政策数据（复用原fetch_policy_data的格式）
+first_request = True
+POLICY_DATA = []
 
 
-# 生成政策数据（添加省份映射）
+# 生成政策数据
 def fetch_policy_data():
     try:
         policy_list = []
         for keyword in KEYWORDS:
             for domain in ALLOWED_DOMAINS:
-                # 从域名提取省份信息（示例逻辑，实际应从数据中提取）
-                province_code = domain.split('.')[0]  # 如 "shanghai.gov.cn"
+                province_code = domain.split('.')[0]
                 province = PROVINCE_MAP.get(province_code, "全国")
                 
                 response = {
@@ -110,11 +107,11 @@ def fetch_policy_data():
                     "url": f"https://{domain}/policy/{keyword}/",
                     "id": f"{domain}-{keyword}",
                     "category": "policy" if "政策" in keyword else "fund" if "资金" in keyword else "tech",
-                    "province": province  # 真实省份信息
+                    "province": province
                 }
                 policy_list.append(response)
         
-        # 【保留】原去重逻辑
+        # 去重
         unique_policies = []
         seen_urls = set()
         for policy in policy_list:
@@ -127,32 +124,28 @@ def fetch_policy_data():
         print(f"获取政策数据失败: {e}")
         return []
 
-# 【新增】获取所有省份接口
+
+# 获取所有省份接口
 @app.route('/api/provinces', methods=['GET'])
 def get_provinces():
-    # 从政策数据中动态提取省份
-    provinces = ["all"]  # 包含"全部"选项
+    provinces = ["all"]
     if POLICY_DATA:
         unique_provinces = list({policy["province"] for policy in POLICY_DATA})
-        provinces.extend(sorted(unique_provinces))  # 按字母排序
+        provinces.extend(sorted(unique_provinces))
     return jsonify({"code": 200, "data": provinces})
 
 
-# ========== 【保留】原报告生成逻辑（完全不变） ==========
+# 报告生成逻辑
 def generate_daily_report():
     try:
         today = datetime.now().strftime("%Y-%m-%d")
         report_file = os.path.join(REPORT_DIR, f"daily_report_{today}.json")
         
-        # 获取政策数据
         policies = fetch_policy_data()
-        
-        # 按关键词分类统计
         category_count = {}
         for keyword in KEYWORDS:
             category_count[keyword] = sum(keyword in policy["title"] for policy in policies)
         
-        # 生成报告
         report = {
             "date": today,
             "total_policies": len(policies),
@@ -161,7 +154,6 @@ def generate_daily_report():
             "summary": f"今日共收集到{len(policies)}条渔业及大棚种植相关政策"
         }
         
-        # 保存报告
         with open(report_file, 'w', encoding='utf-8') as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
         
@@ -172,22 +164,17 @@ def generate_daily_report():
         return {"error": str(e)}
 
 
-# ========== 【新增】前端专属接口（与历史功能解耦，不影响原有逻辑） ==========
-
-# 1. 政策列表接口（支持分类、省份、关键词筛选）
+# 政策列表接口
 @app.route('/api/policies', methods=['GET'])
 def get_policies():
     global POLICY_DATA
-    # 首次请求时初始化政策数据（复用原fetch_policy_data）
     if not POLICY_DATA:
         POLICY_DATA = fetch_policy_data()
     
-    # 前端参数：category（政策/资金/科技）、province、keyword
     category = request.args.get('category', 'policy')
     province = request.args.get('province', 'all')
     keyword = request.args.get('keyword', '').strip()
     
-    # 筛选逻辑
     filtered = [
         p for p in POLICY_DATA
         if p['category'] == category 
@@ -198,7 +185,7 @@ def get_policies():
     return jsonify({"code": 200, "data": filtered, "total": len(filtered)})
 
 
-# 2. 政策详情接口
+# 政策详情接口
 @app.route('/api/policy/<string:policy_id>', methods=['GET'])
 def get_policy_detail(policy_id):
     global POLICY_DATA
@@ -208,7 +195,7 @@ def get_policy_detail(policy_id):
     return jsonify({"code": 200, "data": policy})
 
 
-# 3. AI解读接口（模拟，后续可替换为豆包API）
+# ========== AI解读接口（已填入你的密钥） ==========
 @app.route('/api/interpret/<string:policy_id>', methods=['GET'])
 def get_ai_interpret(policy_id):
     global POLICY_DATA
@@ -216,12 +203,57 @@ def get_ai_interpret(policy_id):
     if not policy:
         return jsonify({"code": 404, "message": "政策不存在"}), 404
     
-    # 模拟AI解读（核心要点提炼）
-    interpretation = f"【政策核心要点】\n1. 政策主题：{policy['title']}\n2. 发布单位：{policy['source']}\n3. 关键内容：{policy['content'][:100]}...\n4. 适用范围：{policy['province']}地区"
-    return jsonify({"code": 200, "interpretation": interpretation})
+    # 已填入你的密钥
+    VEI_API_KEY = "sk-1e697322aa3f4cbdbaa9d37fef9066e8ya97b7al4xzsvnkf"  # 你的密钥
+    API_URL = "https://ai-gateway.vei.volces.com/v1/chat/completions"
+    
+    # 构造提示词
+    prompt = f"""请作为农业政策解读专家，分析以下政策的核心要点：
+    政策标题：{policy['title']}
+    政策内容：{policy['content']}
+    发布省份：{policy['province']}
+    
+    要求：
+    1. 分点列出核心信息（政策目的、适用范围、补贴标准等）；
+    2. 语言简洁，用中文口语化表达；
+    3. 不超过300字。
+    """
+    
+    # 调用豆包模型API
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {VEI_API_KEY}"  # 使用你的密钥进行认证
+        }
+        payload = {
+            "model": "doubao-seed-1.6-thinking",
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 300
+        }
+        
+        response = requests.post(
+            API_URL,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        response.raise_for_status()
+        
+        result = response.json()
+        interpretation = result["choices"][0]["message"]["content"]
+        
+        return jsonify({"code": 200, "interpretation": interpretation})
+    
+    except Exception as e:
+        print(f"AI解读调用失败: {str(e)}")
+        # 失败时的备用解读
+        fallback = f"【政策核心要点】\n1. 政策主题：{policy['title']}\n2. 发布单位：{policy['source']}\n3. 适用地区：{policy['province']}"
+        return jsonify({"code": 200, "interpretation": fallback})
 
 
-# 4. 报告列表接口（复用原报告数据）
+# 报告列表接口
 @app.route('/api/reports', methods=['GET'])
 def get_reports():
     reports = []
@@ -231,29 +263,28 @@ def get_reports():
             reports.append({
                 "id": date,
                 "title": f"每日政策报告（{date}）",
-                "summary": f"包含{len(json.load(open(os.path.join(REPORT_DIR, file))))}条政策数据"
+                "summary": f"包含政策数据"
             })
     return jsonify({"code": 200, "data": reports})
 
 
-# 5. 报告下载接口（模拟PDF下载，实际返回JSON内容）
+# 报告下载接口
 @app.route('/api/report/<string:report_id>/download', methods=['GET'])
 def download_report(report_id):
     report_file = os.path.join(REPORT_DIR, f"daily_report_{report_id}.json")
     if not os.path.exists(report_file):
         return jsonify({"code": 404, "message": "报告不存在"}), 404
     
-    # 读取报告内容（模拟PDF下载，实际需用fpdf2生成PDF）
     with open(report_file, 'r', encoding='utf-8') as f:
         report_data = json.load(f)
     return jsonify({
         "code": 200,
-        "download_url": f"https://agri-backend-ame6.onrender.com/api/report/{report_id}/pdf",  # 模拟PDF链接
+        "download_url": f"https://agri-backend-ame6.onrender.com/api/report/{report_id}/pdf",
         "report_data": report_data
     })
 
 
-# ========== 【保留】原健康检查、定时任务（完全不变） ==========
+# 健康检查与定时任务
 @app.route('/')
 def health_check():
     return jsonify({"status": "ok", "message": "Service is running"}), 200
