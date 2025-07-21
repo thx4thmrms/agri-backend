@@ -9,16 +9,12 @@ import os
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from flask_cors import CORS
-
 app = Flask(__name__)
-
 # ========== 跨域配置 ==========
 CORS(app, resources={r"/api/*": {"origins": "*"}})
-
 # ========== 历史功能变量 ==========
 REPORT_DIR = "policy_data"
 os.makedirs(REPORT_DIR, exist_ok=True)
-
 # 完整关键词列表
 KEYWORDS = [
     # 内陆渔业养殖
@@ -54,7 +50,6 @@ KEYWORDS = [
     "农业补贴", "渔业保险", "渔业项目申报", "渔业贷款", "设施农业补贴",
     "现代农业产业园", "渔业绿色发展", "生态补偿", "碳汇渔业"
 ]
-
 # 允许的域名列表
 ALLOWED_DOMAINS = [
     # 政府网站
@@ -70,7 +65,6 @@ ALLOWED_DOMAINS = [
     "greenhouse.cn", "facility-agri.com.cn", "agri-facility.com",
     "aquatech.cn", "fishxun.com", "agri-tech.com.cn", "hydroponics.cn"
 ]
-
 # 省份映射
 PROVINCE_MAP = {
     "beijing": "北京", "shanghai": "上海", "guangdong": "广东",
@@ -85,48 +79,70 @@ PROVINCE_MAP = {
     "xinjiang": "新疆", "xizang": "西藏", "hainan": "海南",
     "neimenggu": "内蒙古"
 }
-
 first_request = True
 POLICY_DATA = []
-
-
-# 爬取政策数据
+# 爬取政策数据（修复真实数据爬取逻辑）
 def fetch_policy_data():
     try:
         policy_list = []
-        for keyword in KEYWORDS[:5]:  # 先测试前5个关键词，减少请求量
-            for domain in ALLOWED_DOMAINS[:3]:  # 先测试前3个域名，避免请求过多
+        # 遍历所有关键词和域名（取消数量限制，确保覆盖完整数据）
+        for keyword in KEYWORDS:  
+            for domain in ALLOWED_DOMAINS:  
                 try:
-                    # 构造合理的搜索URL（部分网站搜索路径可能不是/search?q=）
-                    url = f"https://www.{domain}/search?q={keyword}"  # 加www.避免无效域名
+                    # 根据域名类型调整搜索URL（适配不同网站的搜索接口）
+                    if domain.endswith(("gov.cn", "agri.gov.cn", "moa.gov.cn")):
+                        # 政府网站常用搜索路径
+                        url = f"https://www.{domain}/s?wd={keyword}"
+                    else:
+                        # 其他网站默认搜索路径
+                        url = f"https://www.{domain}/search?q={keyword}"
+                    
+                    # 增强请求头，模拟真实浏览器（避免被反爬）
                     headers = {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                        "Accept-Language": "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2",
+                        "Referer": f"https://www.{domain}/"  # 模拟站内跳转
                     }
-                    response = requests.get(url, headers=headers, timeout=10)  # 超时10秒
+                    
+                    # 控制请求频率（避免触发反爬）
+                    time.sleep(1)
+                    
+                    response = requests.get(url, headers=headers, timeout=15)  # 延长超时时间
                     response.raise_for_status()  # 触发4xx/5xx错误
                     
                     soup = BeautifulSoup(response.text, 'html.parser')
-                    # 兼容不同网站的文章标签（div/article/li等）
-                    articles = soup.find_all(['article', 'div', 'li'], class_=['news', 'article', 'item'])
+                    # 扩展文章标签匹配（适配更多网站结构）
+                    articles = soup.find_all(['article', 'div', 'li', 'tr'], 
+                                           class_=['news', 'article', 'item', 'list', 'policy'])
                     if not articles:
-                        continue  # 没有文章则跳过
+                        continue  # 无数据则跳过
                     
-                    for article in articles[:2]:  # 每个页面只取前2条，避免数据过多
-                        title_tag = article.find(['h2', 'h3', 'a'])
+                    # 每个页面取前5条数据（平衡数量与效率）
+                    for article in articles[:5]:  
+                        # 提取标题（优先匹配标题标签）
+                        title_tag = article.find(['h1', 'h2', 'h3', 'a'], class_=['title', 'news-title'])
                         title = title_tag.text.strip() if title_tag else f"未命名政策_{keyword}"
                         
-                        content_tag = article.find(['p', 'div'], class_=['content', 'desc'])
-                        content = content_tag.text.strip()[:200] if content_tag else f"关于{keyword}的政策内容..."
+                        # 提取内容（优先匹配正文标签）
+                        content_tag = article.find(['div', 'p'], class_=['content', 'desc', 'text', 'article-body'])
+                        content = content_tag.text.strip()[:300] if content_tag else f"关于{keyword}的政策内容，具体可参考原文链接。"
                         
-                        url_tag = article.find('a')
-                        article_url = url_tag['href'] if (url_tag and 'href' in url_tag.attrs) else f"https://{domain}"
-                        if not article_url.startswith('http'):  # 补全相对路径
-                            article_url = f"https://{domain}{article_url}"
+                        # 提取原文链接（补全相对路径）
+                        url_tag = article.find('a', href=True)
+                        article_url = url_tag['href'] if url_tag else f"https://www.{domain}"
+                        if not article_url.startswith(('http://', 'https://')):
+                            article_url = f"https://www.{domain}{article_url}"
                         
+                        # 提取发布时间（优先从标签获取，无则用当前时间）
+                        date_tag = article.find(['time', 'span'], class_=['date', 'time', 'publish-date'])
+                        date = date_tag.text.strip() if date_tag else datetime.now().strftime("%Y-%m-%d")
+                        
+                        # 构造政策数据
                         policy = {
                             "title": title,
                             "source": domain,
-                            "date": datetime.now().strftime("%Y-%m-%d"),
+                            "date": date,
                             "content": content,
                             "url": article_url,
                             "id": f"{domain}-{hash(article_url)}",
@@ -136,25 +152,31 @@ def fetch_policy_data():
                         policy_list.append(policy)
                         
                 except Exception as e:
-                    print(f"爬取 {domain} 失败（关键词：{keyword}）：{str(e)}")
-                    continue  # 跳过错误域名，继续下一个
+                    print(f"爬取 {domain}（关键词：{keyword}）失败：{str(e)}")
+                    continue  # 单个网站失败不影响整体
         
-        # 去重（按URL）
+        # 去重（按URL+标题，更严格）
         unique_policies = []
-        seen_urls = set()
+        seen_keys = set()
         for p in policy_list:
-            if p["url"] not in seen_urls:
-                seen_urls.add(p["url"])
+            key = f"{p['url']}_{p['title']}"  # 联合去重，避免同URL不同标题
+            if key not in seen_keys:
+                seen_keys.add(key)
                 unique_policies.append(p)
         
-        return unique_policies if unique_policies else [{"title": "测试政策", "id": "test-1", "category": "policy", "province": "全国", "content": "测试内容", "source": "test.gov.cn", "url": "https://test.gov.cn"}]
+        # 仅在完全无真实数据时返回测试数据
+        return unique_policies if unique_policies else [
+            {"title": "测试政策", "id": "test-1", "category": "policy", 
+             "province": "全国", "content": "测试内容（真实数据爬取暂时无结果）", 
+             "source": "test.gov.cn", "url": "https://test.gov.cn", "date": datetime.now().strftime("%Y-%m-%d")}
+        ]
     
     except Exception as e:
         print(f"整体爬取失败：{str(e)}")
-        # 极端错误时返回测试数据，避免接口崩溃
-        return [{"title": "应急测试政策", "id": "emergency-1", "category": "policy", "province": "全国", "content": "接口正常运行中...", "source": "test.gov.cn", "url": "https://test.gov.cn"}]
-
-
+        # 极端错误时返回应急数据
+        return [{"title": "应急测试政策", "id": "emergency-1", "category": "policy", 
+                 "province": "全国", "content": "接口正常运行中，暂未获取到真实数据", 
+                 "source": "test.gov.cn", "url": "https://test.gov.cn", "date": datetime.now().strftime("%Y-%m-%d")}]
 # 获取所有省份接口
 @app.route('/api/provinces', methods=['GET'])
 def get_provinces():
@@ -163,8 +185,6 @@ def get_provinces():
         unique_provinces = list({policy["province"] for policy in POLICY_DATA})
         provinces.extend(sorted(unique_provinces))
     return jsonify({"code": 200, "data": provinces})
-
-
 # 报告生成逻辑
 def generate_daily_report():
     try:
@@ -192,8 +212,6 @@ def generate_daily_report():
     except Exception as e:
         print(f"生成报告失败: {e}")
         return {"error": str(e)}
-
-
 # 政策列表接口
 @app.route('/api/policies', methods=['GET'])
 def get_policies():
@@ -213,8 +231,6 @@ def get_policies():
     ]
     
     return jsonify({"code": 200, "data": filtered, "total": len(filtered)})
-
-
 # 政策详情接口
 @app.route('/api/policy/<string:policy_id>', methods=['GET'])
 def get_policy_detail(policy_id):
@@ -223,8 +239,6 @@ def get_policy_detail(policy_id):
     if not policy:
         return jsonify({"code": 404, "message": "政策不存在"}), 404
     return jsonify({"code": 200, "data": policy})
-
-
 # ========== AI解读接口（已填入你的密钥） ==========
 @app.route('/api/interpret/<string:policy_id>', methods=['GET'])
 def get_ai_interpret(policy_id):
@@ -281,8 +295,6 @@ def get_ai_interpret(policy_id):
         # 失败时的备用解读
         fallback = f"【政策核心要点】\n1. 政策主题：{policy['title']}\n2. 发布单位：{policy['source']}\n3. 适用地区：{policy['province']}"
         return jsonify({"code": 200, "interpretation": fallback})
-
-
 # 报告列表接口
 @app.route('/api/reports', methods=['GET'])
 def get_reports():
@@ -296,8 +308,6 @@ def get_reports():
                 "summary": f"包含政策数据"
             })
     return jsonify({"code": 200, "data": reports})
-
-
 # 报告下载接口
 @app.route('/api/report/<string:report_id>/download', methods=['GET'])
 def download_report(report_id):
@@ -312,26 +322,21 @@ def download_report(report_id):
         "download_url": f"https://agri-backend-ame6.onrender.com/api/report/{report_id}/pdf",
         "report_data": report_data
     })
-
-
 # 健康检查与定时任务
 @app.route('/')
 def health_check():
     return jsonify({"status": "ok", "message": "Service is running"}), 200
-
 def scheduled_task():
     schedule.every().day.at("08:00").do(generate_daily_report)
     print("定时任务已设置：每天08:00生成报告")
     while True:
         schedule.run_pending()
         time.sleep(60)
-
 def start_scheduled_task():
     task_thread = threading.Thread(target=scheduled_task)
     task_thread.daemon = True
     task_thread.start()
     print("定时任务线程已启动")
-
 @app.before_request
 def initialize():
     global first_request
@@ -339,7 +344,6 @@ def initialize():
         first_request = False
         start_scheduled_task()
         print("应用初始化完成")
-
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
