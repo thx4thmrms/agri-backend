@@ -71,27 +71,46 @@ ALLOWED_DOMAINS = [
     "aquatech.cn", "fishxun.com", "agri-tech.com.cn", "hydroponics.cn"
 ]
 
+# 模拟省份映射（实际项目应从政策数据中提取
+PROVINCE_MAP = {
+    "beijing": "北京", "shanghai": "上海", "guangdong": "广东",
+    "zhejiang": "浙江", "jiangsu": "江苏", "shandong": "山东",
+    "hubei": "湖北", "hunan": "湖南", "sichuan": "四川",
+    "henan": "河南", "hebei": "河北", "liaoning": "辽宁",
+    "fujian": "福建", "anhui": "安徽", "guangxi": "广西",
+    "yunnan": "云南", "guizhou": "贵州", "chongqing": "重庆",
+    "tianjin": "天津", "shanxi": "山西", "jilin": "吉林",
+    "heilongjiang": "黑龙江", "jiangxi": "江西", "gansu": "甘肃",
+    "shaanxi": "陕西", "qinghai": "青海", "ningxia": "宁夏",
+    "xinjiang": "新疆", "xizang": "西藏", "hainan": "海南",
+    "neimenggu": "内蒙古"
+}
+
 first_request = True  # 【保留】首次请求标志
 
 # ========== 【新增】前端接口专用：政策数据存储（复用原模拟逻辑） ==========
 POLICY_DATA = []  # 存储政策数据（复用原fetch_policy_data的格式）
 
 
-# ========== 【保留】原模拟政策数据逻辑（完全不变） ==========
+# 生成政策数据（添加省份映射）
 def fetch_policy_data():
     try:
         policy_list = []
         for keyword in KEYWORDS:
             for domain in ALLOWED_DOMAINS:
+                # 从域名提取省份信息（示例逻辑，实际应从数据中提取）
+                province_code = domain.split('.')[0]  # 如 "shanghai.gov.cn"
+                province = PROVINCE_MAP.get(province_code, "全国")
+                
                 response = {
                     "title": f"2025年{keyword}技术指南与政策支持 - {domain}",
                     "source": domain,
                     "date": datetime.now().strftime("%Y-%m-%d"),
-                    "content": f"关于{keyword}的最新技术发展和补贴标准...该政策由{domain}发布，详细内容包括补贴申请条件、技术应用规范等。",
-                    "url": f"https://{domain}/policy/{keyword}/{datetime.now().strftime('%Y%m%d')}",
-                    "id": f"{domain}-{keyword}-{datetime.now().strftime('%Y%m%d')}",  # 唯一ID（前端需用）
-                    "category": "policy" if "政策" in keyword else "fund" if "资金" in keyword else "tech",  # 按关键词自动分类
-                    "province": "全国" if "gov.cn" in domain else domain.split('.')[0]  # 简单省份判断
+                    "content": f"关于{keyword}的最新技术发展和补贴标准...",
+                    "url": f"https://{domain}/policy/{keyword}/",
+                    "id": f"{domain}-{keyword}",
+                    "category": "policy" if "政策" in keyword else "fund" if "资金" in keyword else "tech",
+                    "province": province  # 真实省份信息
                 }
                 policy_list.append(response)
         
@@ -107,6 +126,16 @@ def fetch_policy_data():
     except Exception as e:
         print(f"获取政策数据失败: {e}")
         return []
+
+# 【新增】获取所有省份接口
+@app.route('/api/provinces', methods=['GET'])
+def get_provinces():
+    # 从政策数据中动态提取省份
+    provinces = ["all"]  # 包含"全部"选项
+    if POLICY_DATA:
+        unique_provinces = list({policy["province"] for policy in POLICY_DATA})
+        provinces.extend(sorted(unique_provinces))  # 按字母排序
+    return jsonify({"code": 200, "data": provinces})
 
 
 # ========== 【保留】原报告生成逻辑（完全不变） ==========
