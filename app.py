@@ -11,21 +11,40 @@ from fake_useragent import UserAgent
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# ================= 核心配置（无强制代理） =================
+# ================= 核心配置 =================
 KEYWORDS = [
-    "大棚 政策", "温室大棚 补贴", "设施农业 扶持", 
-    "渔业 新政策", "水产养殖 补贴", "休渔期 调整"
+    # 农业政策
+    "农业补贴", "农村金融", "农业用地", "农产品流通",
+    "农业合作社", "农业规划", "农业投资", "三农政策",
+    
+    # 渔业政策（新增渔港、海洋牧场相关）
+    "渔业管理", "水产养殖", "渔业资源", "渔港", 
+    "渔港建设", "海洋牧场", "远洋渔业", "渔业安全",
+    "水生生物", "渔业科技", "渔业经济", "渔业生态",
+    
+    # 设施农业
+    "大棚", "温室", "智能农业", "无土栽培",
+    "垂直农业", "植物工厂", "设施农业", "农业设施",
+    
+    # 科技前沿
+    "农业科技", "智慧农业", "数字农业", "农业AI",
+    "农业物联网", "农业大数据", "农业机器人", "农业自动化"
 ]
-SEARCH_ENGINES = [  # 移除腾讯相关，专注通用引擎
-    "https://www.baidu.com/s?wd=",   # 百度
-    "https://www.bing.com/search?q=",# 必应
-    "https://www.so.com/s?q=",       # 360搜索（可选）
-]
-DB_PATH = "policies.db"  # 数据库存储
 
-# ================= 基础功能（无代理） =================
+# 自动扩展关键词（添加"政策"后缀提高命中率）
+def expand_keywords(original_keywords):
+    expanded = []
+    for kw in original_keywords:
+        expanded.append(kw)
+        if "政策" not in kw and "补贴" not in kw:
+            expanded.append(f"{kw} 政策")
+    return expanded
+
+EXPANDED_KEYWORDS = expand_keywords(KEYWORDS)
+DB_PATH = "policies.db"
+
+# ================= 基础功能 =================
 def init_db():
-    """初始化数据库"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -36,14 +55,30 @@ def init_db():
             date TEXT,
             content TEXT,
             url TEXT,
-            crawled_at TEXT
+            crawled_at TEXT,
+            category TEXT
         )
     ''')
     conn.commit()
     conn.close()
 
+def classify_policy(policy):
+    """根据标题和内容分类政策类型"""
+    title = policy['title']
+    content = policy.get('content', '')
+    
+    if any(kw in title for kw in ['补贴', '资金', '扶持', '奖补', '专项']):
+        return "新增专项资金类"
+    elif any(kw in title for kw in ['科技', 'AI', '物联网', '数字', '智慧', '创新']):
+        return "科技前沿类"
+    elif any(kw in title for kw in ['政策', '条例', '办法', '通知', '规划', '意见']):
+        return "新增政策类"
+    elif any(kw in title for kw in ['渔港', '海洋牧场', '养殖基地', '渔业基地']):
+        return "渔港海洋牧场类"
+    else:
+        return "其他"
+
 def fetch_policy_data():
-    """核心爬取逻辑（无代理，兼容免费代理可选）"""
     init_db()
     three_months_ago = datetime.now() - timedelta(days=90)
     policy_list = []
@@ -56,21 +91,19 @@ def fetch_policy_data():
     existing_urls = set(row[0] for row in cursor.fetchall())
     conn.close()
 
-    for keyword in KEYWORDS:
-        encoded_keyword = quote(keyword + " 近一季度")
-        for engine in SEARCH_ENGINES:
+    for keyword in EXPANDED_KEYWORDS:
+        encoded_keyword = quote(keyword)
+        for engine in ["https://www.baidu.com/s?wd=", "https://www.bing.com/search?q="]:
             url = f"{engine}{encoded_keyword}"
             headers = {"User-Agent": ua.random}
             
             try:
-                # 无代理模式（默认）
                 response = requests.get(url, headers=headers, timeout=15)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
-                # 通用解析（适配百度/必应/360）
-                articles = soup.find_all(['div', 'li'], class_=['result', 'b_algo', 'res-list'])
-                for article in articles[:5]:  # 每引擎取前5条，防反爬
+                articles = soup.find_all(['div', 'li'], class_=['result', 'b_algo'])
+                for article in articles[:5]:
                     title_tag = article.find('h3') or article.find('a')
                     if not title_tag:
                         continue
@@ -79,16 +112,13 @@ def fetch_policy_data():
                     url_tag = article.find('a', href=True)
                     article_url = url_tag['href']
                     
-                    # 过滤无效链接/重复内容
                     if not article_url.startswith('http') or article_url in existing_urls:
                         continue
                     
-                    # 提取摘要（兼容不同引擎结构）
-                    content_tag = article.find('p') or article.find('div', class_=['c-abstract', 'res-desc'])
+                    content_tag = article.find('p') or article.find('div', class_=['c-abstract', 'b_caption'])
                     content = content_tag.text.strip()[:200] if content_tag else "无摘要..."
                     
-                    # 提取日期（百度格式：2025-07-20，必应格式：2025年7月20日）
-                    date_tag = article.find('span', class_=['c-color-gray2', 'b_tween', 'res-date'])
+                    date_tag = article.find('span', class_=['c-color-gray2', 'b_tween'])
                     article_date = datetime.now()
                     if date_tag:
                         date_str = date_tag.text.strip()
@@ -103,7 +133,8 @@ def fetch_policy_data():
                     if article_date >= three_months_ago:
                         domain = article_url.split('/')[2]
                         policy_id = f"{domain}-{hash(article_url)}"
-                        policy_list.append({
+                        
+                        policy = {
                             "id": policy_id,
                             "title": title,
                             "source": domain,
@@ -111,10 +142,14 @@ def fetch_policy_data():
                             "content": content,
                             "url": article_url,
                             "crawled_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        })
+                        }
+                        
+                        # 分类并存储
+                        policy['category'] = classify_policy(policy)
+                        policy_list.append(policy)
                         existing_urls.add(article_url)
                 
-                time.sleep(random.uniform(1, 3))  # 防反爬延迟
+                time.sleep(random.uniform(3, 5))  # 延长间隔防反爬
                 
             except Exception as e:
                 print(f"爬取失败（{engine} | {keyword}）：{str(e)}")
@@ -127,37 +162,36 @@ def fetch_policy_data():
         for p in policy_list:
             try:
                 cursor.execute('''
-                    INSERT INTO policies (id, title, source, date, content, url, crawled_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (p['id'], p['title'], p['source'], p['date'], p['content'], p['url'], p['crawled_at']))
+                    INSERT INTO policies (id, title, source, date, content, url, crawled_at, category)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (p['id'], p['title'], p['source'], p['date'], p['content'], p['url'], p['crawled_at'], p['category']))
             except sqlite3.IntegrityError:
-                pass  # 跳过重复
+                pass
         conn.commit()
         conn.close()
 
-    # 兜底：返回数据库历史数据（最近7天）
+    # 返回最近7天数据
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
         SELECT * FROM policies 
         WHERE date >= date('now', '-7 days') 
         ORDER BY crawled_at DESC 
-        LIMIT 10
+        LIMIT 50
     ''')
     rows = cursor.fetchall()
     conn.close()
     
     return [{"id": row[0], "title": row[1], "source": row[2], 
-             "date": row[3], "content": row[4], "url": row[5]} for row in rows]
+             "date": row[3], "content": row[4], "url": row[5],
+             "category": row[6]} for row in rows]
 
 # ================= 接口定义 =================
 @app.route('/api/policies', methods=['GET'])
 def get_policies():
-    """政策列表接口（无代理，纯搜索引擎爬取）"""
     keyword = request.args.get('keyword', '').strip()
     policies = fetch_policy_data()
     
-    # 关键词过滤
     if keyword:
         policies = [p for p in policies if keyword in p['title'] or keyword in p['content']]
     
@@ -165,13 +199,12 @@ def get_policies():
         "code": 200,
         "data": policies,
         "total": len(policies),
-        "message": "无代理模式，数据来自搜索引擎（百度/必应）",
+        "message": "数据来自搜索引擎（百度/必应）",
         "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     })
 
 @app.route('/')
 def health_check():
-    """健康检查（显示数据库数据量）"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT COUNT(*) FROM policies')
@@ -180,7 +213,7 @@ def health_check():
     return jsonify({
         "status": "ok",
         "database_count": count,
-        "message": "服务运行中（无代理模式，支持关键词搜索）"
+        "message": "服务运行中（支持分类和关键词搜索）"
     }), 200
 
 if __name__ == '__main__':
